@@ -39,14 +39,20 @@ class PredictionOutput(BaseModel):
     """
     Schema for prediction output.
     """
-    prediction: str = Field(..., description="Predicted class: 'claim' or 'opinion'")
-    probability: float = Field(..., description="Probability of the predicted class")
+    video_id: int = Field(..., description="The unique identifier of the video")
+    claim_status: str = Field(..., description="The predicted label: 'claim' or 'opinion'")
+    claim_probability: float = Field(..., description="Probability that the video contains a claim (0-1)")
+    confidence: float = Field(..., description="Confidence in the prediction (0-1)")
+    model_version: str = Field(..., description="Version of the model used for prediction")
     
     class Config:
         schema_extra = {
             "example": {
-                "prediction": "claim",
-                "probability": 0.92
+                "video_id": 7017666017,
+                "claim_status": "claim",
+                "claim_probability": 0.92,
+                "confidence": 0.92,
+                "model_version": "1.0.0"
             }
         }
 

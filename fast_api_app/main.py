@@ -1,12 +1,18 @@
 import os
 import joblib
 import pandas as pd
+import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 # Import schemas and preprocessing functions
 from .schemas import VideoInput, PredictionOutput, HealthResponse
 from .preprocessing import prepare_single_prediction
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Define application
 app = FastAPI(
@@ -65,35 +71,53 @@ async def health_check():
 @app.post("/predict", response_model=PredictionOutput)
 async def predict(video: VideoInput):
     """
-    Make a prediction for a video.
-    
-    Takes video data as input and returns whether it's a claim or opinion,
-    along with the probability.
+    Predict whether a TikTok video contains a claim or opinion
     """
     try:
-        # Prepare input data for prediction
+        # Prepare input data
         input_data = video.dict()
         
-        # Add dummy value for '#' column which will be dropped
-        input_data["#"] = 0
+        # Log the incoming request
+        logger.info(f"Received prediction request for video_id: {input_data['video_id']}")
         
-        # Process input data
+        # Prepare features for prediction
         X_pred = prepare_single_prediction(input_data, text_vectorizer)
         
+        # Log the feature names to help with debugging
+        logger.info(f"Feature names after preprocessing: {list(X_pred.columns)}")
+        
         # Make prediction
-        pred_proba = model.predict_proba(X_pred)[0]
-        pred_class_idx = int(pred_proba[1] > 0.5)  # 1 if prob > 0.5 else 0
+        prediction_proba = model.predict_proba(X_pred)[0]
+        prediction = model.predict(X_pred)[0]
         
-        # Map prediction to human-readable label (0=opinion, 1=claim)
-        prediction = "claim" if pred_class_idx == 1 else "opinion"
-        probability = pred_proba[pred_class_idx]
+        # Map numerical prediction to label
+        claim_status = "claim" if prediction == 1 else "opinion"
         
-        return PredictionOutput(
-            prediction=prediction,
-            probability=float(probability)
-        )
-    
+        # Calculate confidence
+        confidence = prediction_proba[1] if prediction == 1 else prediction_proba[0]
+        
+        return {
+            "video_id": input_data["video_id"],
+            "claim_status": claim_status,
+            "claim_probability": float(prediction_proba[1]),
+            "confidence": float(confidence),
+            "model_version": MODEL_VERSION
+        }
     except Exception as e:
+        # Log the error
+        logger.error(f"Prediction error: {str(e)}")
+        
+        # If it's a feature mismatch error, provide more details
+        if "feature_names mismatch" in str(e):
+            model_features = model.feature_names_in_ if hasattr(model, 'feature_names_in_') else []
+            input_features = list(X_pred.columns) if 'X_pred' in locals() else []
+            
+            missing_features = [f for f in model_features if f not in input_features]
+            extra_features = [f for f in input_features if f not in model_features]
+            
+            error_detail = f"Feature mismatch error: Missing {missing_features}, Extra {extra_features}"
+            logger.error(error_detail)
+            
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
 

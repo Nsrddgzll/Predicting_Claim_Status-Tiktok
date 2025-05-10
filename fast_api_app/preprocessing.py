@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.feature_extraction.text import CountVectorizer
 import joblib
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, Dict, Any
 
 
 def load_and_clean_data(csv_path: str) -> pd.DataFrame:
@@ -99,27 +99,57 @@ def prepare_features_and_target(
 
 
 def prepare_single_prediction(
-    input_data: dict,
+    input_data: Dict[str, Any], 
     text_vectorizer: CountVectorizer
 ) -> pd.DataFrame:
     """
-    Prepare a single data point for prediction using the trained model.
+    Prepares a single input for prediction with all necessary feature engineering.
     
     Args:
-        input_data: Dictionary containing features for a single video
-        text_vectorizer: Fitted CountVectorizer from training
-        
+        input_data: Dictionary containing input data from the API request
+        text_vectorizer: Pre-trained CountVectorizer for text features
+    
     Returns:
-        X_pred: DataFrame with features ready for model prediction
+        DataFrame with all features needed for model prediction
     """
-    # Convert input dictionary to DataFrame
-    df = pd.DataFrame([input_data])
+    # Create a pandas Series from input data
+    input_series = pd.Series(input_data)
     
-    # Process the single data point
-    X_pred, _, _ = prepare_features_and_target(
-        df,
-        text_vectorizer=text_vectorizer,
-        fit_text_vectorizer=False
-    )
+    # Extract numerical features
+    numerical_features = [
+        'video_duration_sec', 
+        'video_view_count', 
+        'video_like_count',
+        'video_share_count', 
+        'video_download_count', 
+        'video_comment_count'
+    ]
     
-    return X_pred 
+    # Create a DataFrame with numerical features
+    X = pd.DataFrame([input_series[numerical_features].values], columns=numerical_features)
+    
+    # Add text length feature
+    X['text_length'] = len(input_data['video_transcription_text'])
+    
+    # Add text features using vectorizer
+    if input_data['video_transcription_text']:
+        text_features = text_vectorizer.transform([input_data['video_transcription_text']])
+        text_feature_names = text_vectorizer.get_feature_names_out()
+        text_df = pd.DataFrame(text_features.toarray(), columns=text_feature_names)
+        X = pd.concat([X, text_df], axis=1)
+    else:
+        # If empty text, add zero columns for text features
+        text_feature_names = text_vectorizer.get_feature_names_out()
+        zeros = np.zeros((1, len(text_feature_names)))
+        text_df = pd.DataFrame(zeros, columns=text_feature_names)
+        X = pd.concat([X, text_df], axis=1)
+    
+    # Handle categorical features using one-hot encoding
+    # Add verified_status feature
+    X['verified_status_verified'] = 1 if input_data['verified_status'] == 'verified' else 0
+    
+    # Add author_ban_status features
+    X['author_ban_status_banned'] = 1 if input_data['author_ban_status'] == 'banned' else 0
+    X['author_ban_status_under review'] = 1 if input_data['author_ban_status'] == 'under review' else 0
+    
+    return X 
